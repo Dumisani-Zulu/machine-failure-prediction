@@ -1,6 +1,6 @@
 # backend/routes/machine_routes.py
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, Response, stream_with_context
 from flask_cors import CORS
 import random
 import time
@@ -12,17 +12,21 @@ from threading import Lock
 import csv
 import statistics
 import sys
+import queue
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from services.sensor_simulation import simulator
 from services.prediction_service import get_machine_specific_prediction
 
 machine_bp = Blueprint('machine_bp', __name__)
-CORS(machine_bp, origins=['http://localhost:3000', 'http://127.0.0.1:3000'])
+CORS(machine_bp, origins=['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:3001', 'http://127.0.0.1:3001'])
 
 # Global variables for simulation control
 simulation_running = False
 simulation_thread = None
 lock = Lock()
+
+# Queue for broadcasting vitals updates to connected clients
+vitals_update_queue = queue.Queue(maxsize=100)
 
 # Log file path
 LOG_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs', 'machine_vitals.log')
@@ -186,7 +190,7 @@ def log_vitals_to_file(vitals):
         print(f"Error logging vitals: {e}")
 
 def simulation_worker():
-    """Background worker that generates vitals every minute"""
+    """Background worker that generates vitals every 30 seconds for each machine with ML predictions"""
     global simulation_running
     
     # Initialize CURRENT_MACHINE_VITALS if empty using dataset stats
@@ -195,35 +199,120 @@ def simulation_worker():
             for machine in MINING_MACHINES:
                 # seed around dataset mean with a small machine-specific offset
                 CURRENT_MACHINE_VITALS[machine['id']] = {
+                    'machine_id': machine['id'],
+                    'machine_name': machine['name'],
+                    'machine_type': machine['type'],
                     'temperature': round(DATASET_STATS['temperature']['mean'] + random.uniform(-5, 5), 2),
                     'pressure': round(DATASET_STATS['pressure']['mean'] + random.uniform(-8, 8), 2),
                     'vibration': round(DATASET_STATS['vibration']['mean'] + random.uniform(-0.2, 0.2), 2),
-                    'timestamp': datetime.utcnow().isoformat()
+                    'timestamp': datetime.utcnow().isoformat(),
+                    'history': []  # Store recent history for ML predictions
                 }
 
+    print("[Simulation Worker] Started - updating vitals every 30 seconds")
+    
     # Main loop: update each machine's vitals every 30s
     while simulation_running:
         with lock:
-            for mid, vit in list(CURRENT_MACHINE_VITALS.items()):
-                # small random-walk around current value using dataset std as scale
-                t_std = max(0.5, DATASET_STATS['temperature']['std'] * 0.2)
-                p_std = max(1.0, DATASET_STATS['pressure']['std'] * 0.2)
-                v_std = max(0.02, DATASET_STATS['vibration']['std'] * 0.2)
+            updated_machines = []
+            for machine_config in MINING_MACHINES:
+                mid = machine_config['id']
+                vit = CURRENT_MACHINE_VITALS.get(mid)
+                
+                if not vit:
+                    continue
+                
+                # Generate realistic variations using dataset statistics
+                t_std = max(0.5, DATASET_STATS['temperature']['std'] * 0.15)
+                p_std = max(1.0, DATASET_STATS['pressure']['std'] * 0.15)
+                v_std = max(0.02, DATASET_STATS['vibration']['std'] * 0.15)
 
-                new_t = round(max(0, random.gauss(vit['temperature'], t_std)), 2)
-                new_p = round(max(0, random.gauss(vit['pressure'], p_std)), 2)
-                new_v = round(max(0, random.gauss(vit['vibration'], v_std)), 2)
+                # Use Gaussian random walk for smooth, realistic changes
+                new_t = round(max(20, min(120, random.gauss(vit['temperature'], t_std))), 2)
+                new_p = round(max(30, min(220, random.gauss(vit['pressure'], p_std))), 2)
+                new_v = round(max(0.05, min(8, random.gauss(vit['vibration'], v_std))), 3)
 
+                # Update vitals
                 vit['temperature'] = new_t
                 vit['pressure'] = new_p
                 vit['vibration'] = new_v
                 vit['timestamp'] = datetime.utcnow().isoformat()
+                
+                # Maintain history (keep last 10 readings for ML predictions)
+                if 'history' not in vit:
+                    vit['history'] = []
+                    
+                vit['history'].append({
+                    'Timestamp': vit['timestamp'],
+                    'Temperature': new_t,
+                    'Pressure': new_p,
+                    'Vibration': new_v
+                })
+                
+                # Keep only last 10 readings
+                if len(vit['history']) > 10:
+                    vit['history'] = vit['history'][-10:]
+                
+                # Run ML prediction using recent history
+                try:
+                    if len(vit['history']) >= 3:
+                        prediction_result = get_machine_specific_prediction(
+                            machine_config['type'], 
+                            vit['history'][-3:]  # Use last 3 readings for prediction
+                        )
+                        
+                        vit['prediction'] = {
+                            'failure_risk': int(prediction_result.get('most_likely_failure_probability', 0) * 100),
+                            'predicted_failure_type': prediction_result.get('most_likely_failure'),
+                            'estimated_hours': prediction_result.get('most_likely_failure_estimated_hours'),
+                            'risk_level': 'critical' if prediction_result.get('most_likely_failure_probability', 0) >= 0.8 
+                                        else 'high' if prediction_result.get('most_likely_failure_probability', 0) >= 0.6
+                                        else 'medium' if prediction_result.get('most_likely_failure_probability', 0) >= 0.4
+                                        else 'low',
+                            'timestamp': datetime.utcnow().isoformat()
+                        }
+                except Exception as e:
+                    print(f"[Simulation Worker] Prediction error for machine {mid}: {e}")
+                    vit['prediction'] = None
 
                 # log per-machine vitals
                 try:
-                    log_vitals_to_file({'machine_id': mid, **vit})
-                except Exception:
-                    pass
+                    log_vitals_to_file({
+                        'machine_id': mid,
+                        'machine_name': machine_config['name'],
+                        'machine_type': machine_config['type'],
+                        'temperature': new_t,
+                        'pressure': new_p,
+                        'vibration': new_v,
+                        'timestamp': vit['timestamp'],
+                        'prediction': vit.get('prediction')
+                    })
+                except Exception as e:
+                    print(f"[Simulation Worker] Logging error: {e}")
+                
+                updated_machines.append({
+                    'machine_id': mid,
+                    'machine_name': machine_config['name'],
+                    'machine_type': machine_config['type'],
+                    'vitals': {
+                        'temperature': new_t,
+                        'pressure': new_p,
+                        'vibration': new_v,
+                        'timestamp': vit['timestamp']
+                    },
+                    'prediction': vit.get('prediction')
+                })
+            
+            # Broadcast updates to connected clients
+            try:
+                update_data = {
+                    'timestamp': datetime.utcnow().isoformat(),
+                    'machines': updated_machines
+                }
+                vitals_update_queue.put(update_data, block=False)
+            except queue.Full:
+                # Queue full, skip this update
+                pass
 
         # Sleep 30 seconds in 1s increments to allow prompt stop
         sleep_seconds = 30
@@ -231,6 +320,94 @@ def simulation_worker():
             if not simulation_running:
                 break
             time.sleep(1)
+    
+    print("[Simulation Worker] Stopped")
+
+@machine_bp.route('/vitals/stream', methods=['GET'])
+def stream_vitals():
+    """Server-Sent Events endpoint for real-time vitals streaming"""
+    def generate():
+        # Send initial connection message
+        yield f"data: {json.dumps({'type': 'connected', 'message': 'Connected to vitals stream'})}\n\n"
+        
+        # Create a local queue for this client
+        client_queue = queue.Queue()
+        
+        while True:
+            try:
+                # Wait for updates with timeout
+                try:
+                    update = vitals_update_queue.get(timeout=5)
+                    # Broadcast to all listeners
+                    yield f"data: {json.dumps({'type': 'update', 'data': update})}\n\n"
+                except queue.Empty:
+                    # Send heartbeat to keep connection alive
+                    yield f"data: {json.dumps({'type': 'heartbeat', 'timestamp': datetime.utcnow().isoformat()})}\n\n"
+            except GeneratorExit:
+                break
+    
+    return Response(
+        stream_with_context(generate()),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no',
+            'Connection': 'keep-alive'
+        }
+    )
+
+@machine_bp.route('/machines/<machine_id>/vitals/current', methods=['GET'])
+def get_machine_current_vitals(machine_id):
+    """Get current vitals for a specific machine"""
+    try:
+        with lock:
+            vitals = CURRENT_MACHINE_VITALS.get(machine_id)
+            
+            if not vitals:
+                return jsonify({
+                    'success': False,
+                    'error': f'Machine {machine_id} not found'
+                }), 404
+            
+            return jsonify({
+                'success': True,
+                'data': vitals
+            }), 200
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@machine_bp.route('/machines/<machine_id>/vitals/history', methods=['GET'])
+def get_machine_vitals_history(machine_id):
+    """Get vitals history for a specific machine"""
+    try:
+        limit = request.args.get('limit', 50, type=int)
+        
+        with lock:
+            vitals = CURRENT_MACHINE_VITALS.get(machine_id)
+            
+            if not vitals:
+                return jsonify({
+                    'success': False,
+                    'error': f'Machine {machine_id} not found'
+                }), 404
+            
+            history = vitals.get('history', [])
+            
+            return jsonify({
+                'success': True,
+                'data': history[-limit:],
+                'count': len(history[-limit:])
+            }), 200
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 @machine_bp.route('/vitals/current', methods=['GET'])
 def get_current_vitals():
@@ -539,9 +716,9 @@ def get_mining_machines():
     try:
         machines_with_data = []
         with lock:
-            # prefer in-memory CURRENT_MACHINE_VITALS (kept up-to-date by the worker)
             for machine in MINING_MACHINES:
                 stored = CURRENT_MACHINE_VITALS.get(machine['id'])
+                
                 if stored:
                     machine_vitals = {
                         'temperature': stored.get('temperature', DATASET_STATS['temperature']['mean']),
@@ -549,6 +726,9 @@ def get_mining_machines():
                         'vibration': stored.get('vibration', DATASET_STATS['vibration']['mean']),
                         'timestamp': stored.get('timestamp')
                     }
+                    
+                    # Use stored prediction if available
+                    prediction = stored.get('prediction')
                 else:
                     # fallback: derive from global simulator with small offsets
                     current_vitals = simulator.get_current_readings()
@@ -558,102 +738,69 @@ def get_mining_machines():
                         'vibration': _extract_sensor_value(current_vitals, 'vibration', DATASET_STATS['vibration']['mean']) + random.uniform(-0.2, 0.2),
                         'timestamp': datetime.utcnow().isoformat()
                     }
+                    prediction = None
 
                 # Calculate health status based on vitals
                 health_status = 'excellent'
-                if (machine_vitals['temperature'] > 80 or 
-                    machine_vitals['pressure'] > 120 or 
+                if (machine_vitals['temperature'] > 95 or 
+                    machine_vitals['pressure'] > 180 or 
                     machine_vitals['vibration'] > 4):
                     health_status = 'critical'
-                elif (machine_vitals['temperature'] > 70 or 
-                      machine_vitals['pressure'] > 110 or 
-                      machine_vitals['vibration'] > 3):
-                    health_status = 'warning'
-                elif (machine_vitals['temperature'] > 60 or 
-                      machine_vitals['pressure'] > 100 or 
+                elif (machine_vitals['temperature'] > 85 or 
+                      machine_vitals['pressure'] > 150 or 
                       machine_vitals['vibration'] > 2):
+                    health_status = 'warning'
+                elif (machine_vitals['temperature'] > 70 or 
+                      machine_vitals['pressure'] > 120 or 
+                      machine_vitals['vibration'] > 1.5):
                     health_status = 'good'
 
-                # Use model-based machine-specific prediction
-                # Build a minimal 3-row history for rolling features expected by the model
-                try:
-                    sample_history = []
-                    for i in range(3):
-                        sample_history.append({
-                            'Timestamp': (datetime.utcnow() - timedelta(seconds=(30*(2 - i)))).isoformat(),
-                            'Temperature': machine_vitals['temperature'] + random.uniform(-1, 1),
-                            'Pressure': machine_vitals['pressure'] + random.uniform(-0.5, 0.5),
-                            'Vibration': machine_vitals['vibration'] + random.uniform(-0.05, 0.05)
-                        })
-
-                    history = get_recent_history_from_logs(limit=3)
-                    if not history:
-                        stored_hist = CURRENT_MACHINE_VITALS.get(machine['id'])
-                        if stored_hist:
-                            history = []
-                            for i in range(3):
-                                history.append({
-                                    'Timestamp': (datetime.utcnow() - timedelta(seconds=(30*(2-i)))).isoformat(),
-                                    'Temperature': stored_hist.get('temperature'),
-                                    'Pressure': stored_hist.get('pressure'),
-                                    'Vibration': stored_hist.get('vibration')
-                                })
-                        else:
-                            history = sample_history
-
-                    prediction_result = get_machine_specific_prediction(machine['type'], history)
-
-                    prob = prediction_result.get('most_likely_failure_probability', 0)
-                    if prob >= 0.8:
-                        maintenance_priority = 'urgent'
+                if prediction:
+                    # Use ML prediction
+                    failure_risk = prediction.get('failure_risk', 0)
+                    predicted_failure = prediction.get('predicted_failure_type', 'unknown')
+                    estimated_hours = prediction.get('estimated_hours', 'N/A')
+                    maintenance_priority = prediction.get('risk_level', 'low')
+                    
+                    if maintenance_priority == 'critical':
                         recommended_action = 'Shut down and perform immediate inspection'
-                    elif prob >= 0.6:
-                        maintenance_priority = 'high'
+                    elif maintenance_priority == 'high':
                         recommended_action = 'Schedule maintenance in next 24 hours'
-                    elif prob >= 0.4:
-                        maintenance_priority = 'medium'
+                    elif maintenance_priority == 'medium':
                         recommended_action = 'Monitor closely and schedule preventive maintenance'
                     else:
-                        maintenance_priority = 'low'
                         recommended_action = 'Continue normal operations'
-
+                    
                     machine_data = {
                         **machine,
                         'health_status': health_status,
                         'vitals': machine_vitals,
                         'operating_hours': random.randint(1500, 4000),
                         'efficiency': random.randint(70, 95),
-                        'last_maintenance': '2024-07-15',
-                        'next_maintenance': '2024-09-15',
-                        'failure_prediction': {
-                            'risk_level': int(prediction_result.get('most_likely_failure_probability', 0) * 100),
-                            'predicted_failure_type': prediction_result.get('most_likely_failure'),
-                            'failure_description': machine['failure_descriptions'].get(prediction_result.get('most_likely_failure', ''), ''),
-                            'estimated_time_to_failure': f"{prediction_result.get('most_likely_failure_estimated_hours', 'N/A')} hours",
-                            'confidence': int(prediction_result.get('most_likely_failure_probability', 0) * 100),
-                            'maintenance_priority': maintenance_priority,
-                            'recommended_action': recommended_action
-                        }
-                    }
-                except Exception as e:
-                    # Fallback to previous random approach if prediction fails
-                    failure_risk = random.randint(15, 85)
-                    predicted_failure = random.choice(machine['common_failures'])
-                    machine_data = {
-                        **machine,
-                        'health_status': health_status,
-                        'vitals': machine_vitals,
-                        'operating_hours': random.randint(1500, 4000),
-                        'efficiency': random.randint(70, 95),
-                        'last_maintenance': '2024-07-15',
-                        'next_maintenance': '2024-09-15',
+                        'last_maintenance': '2024-10-15',
+                        'next_maintenance': '2024-12-15',
                         'failure_prediction': {
                             'risk_level': failure_risk,
                             'predicted_failure_type': predicted_failure,
-                            'failure_description': machine['failure_descriptions'][predicted_failure],
-                            'estimated_time_to_failure': f"{random.randint(24, 168)} hours",
-                            'confidence': random.randint(75, 95)
+                            'failure_description': machine['failure_descriptions'].get(predicted_failure, ''),
+                            'estimated_time_to_failure': f"{estimated_hours} hours",
+                            'confidence': failure_risk,
+                            'maintenance_priority': maintenance_priority,
+                            'recommended_action': recommended_action,
+                            'last_updated': prediction.get('timestamp')
                         }
+                    }
+                else:
+                    # Fallback without prediction
+                    machine_data = {
+                        **machine,
+                        'health_status': health_status,
+                        'vitals': machine_vitals,
+                        'operating_hours': random.randint(1500, 4000),
+                        'efficiency': random.randint(70, 95),
+                        'last_maintenance': '2024-10-15',
+                        'next_maintenance': '2024-12-15',
+                        'failure_prediction': None
                     }
 
                 machines_with_data.append(machine_data)

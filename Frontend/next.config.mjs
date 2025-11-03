@@ -1,5 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  reactStrictMode: true,
   eslint: {
     ignoreDuringBuilds: true,
   },
@@ -10,7 +11,7 @@ const nextConfig = {
     unoptimized: true,
   },
   webpack: (config, { isServer }) => {
-    // Fixes npm packages that depend on `fs` module
+    // Fixes for client-side
     if (!isServer) {
       config.resolve.fallback = {
         ...config.resolve.fallback,
@@ -19,7 +20,7 @@ const nextConfig = {
     }
     return config;
   },
-  // Disable static optimization for better chunk loading
+  // Optimize package imports
   experimental: {
     optimizePackageImports: ['lucide-react', '@radix-ui/react-icons'],
   },
