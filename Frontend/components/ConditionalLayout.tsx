@@ -1,6 +1,6 @@
 "use client"
 
-import { useAuth } from "@/contexts/AuthContext"
+import { useAuth } from "@clerk/nextjs"
 import { usePathname, useRouter } from "next/navigation"
 import { useEffect } from "react"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
@@ -11,27 +11,27 @@ interface ConditionalLayoutProps {
 }
 
 export function ConditionalLayout({ children }: ConditionalLayoutProps) {
-  const { isAuthenticated, isLoading } = useAuth()
+  const { isLoaded, isSignedIn } = useAuth()
   const pathname = usePathname()
   const router = useRouter()
   
   // Handle redirects based on auth state
   useEffect(() => {
-    if (!isLoading) {
-      const isAuthPage = pathname?.startsWith('/auth')
+    if (isLoaded) {
+      const isAuthPage = pathname?.startsWith('/sign-in') || pathname?.startsWith('/sign-up')
       
-      if (!isAuthenticated && !isAuthPage) {
-        // Not authenticated and not on auth page - redirect to signin
-        router.push('/auth/signin')
-      } else if (isAuthenticated && isAuthPage) {
+      if (!isSignedIn && !isAuthPage) {
+        // Not authenticated and not on auth page - redirect to sign-in
+        router.push('/sign-in')
+      } else if (isSignedIn && isAuthPage) {
         // Authenticated and on auth page - redirect to dashboard
         router.push('/')
       }
     }
-  }, [isAuthenticated, isLoading, pathname, router])
+  }, [isSignedIn, isLoaded, pathname, router])
   
   // Show loading spinner while checking auth state
-  if (isLoading) {
+  if (!isLoaded) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
@@ -43,14 +43,14 @@ export function ConditionalLayout({ children }: ConditionalLayoutProps) {
   }
 
   // If on auth pages, render without sidebar
-  const isAuthPage = pathname?.startsWith('/auth')
+  const isAuthPage = pathname?.startsWith('/sign-in') || pathname?.startsWith('/sign-up')
   
   if (isAuthPage) {
     return <>{children}</>
   }
 
   // If not authenticated and not on auth page, show loading while redirect happens
-  if (!isAuthenticated) {
+  if (!isSignedIn) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">

@@ -2,7 +2,7 @@ import type { Metadata } from "next"
 import { Inter } from "next/font/google"
 import "./globals.css"
 
-import { AuthProvider } from "@/contexts/AuthContext"
+import { ClerkProvider } from '@clerk/nextjs'
 import { NotificationsProvider } from "@/contexts/NotificationsContext"
 import { ConditionalLayout } from "../components/ConditionalLayout"
 import { Toaster } from "@/components/ui/toaster"
@@ -24,15 +24,15 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className={inter.className}>
-        <AuthProvider>
+    <ClerkProvider>
+      <html lang="en" suppressHydrationWarning>
+        <body className={inter.className}>
           <NotificationsProvider>
             <ConditionalLayout>{children}</ConditionalLayout>
           </NotificationsProvider>
-        </AuthProvider>
-        <Toaster />
-      </body>
-    </html>
+          <Toaster />
+        </body>
+      </html>
+    </ClerkProvider>
   )
 }

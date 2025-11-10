@@ -3,7 +3,7 @@
 import { Calendar, Home, Wrench, Search, Settings, Users, BarChart3, FileText, Bell, CreditCard, Activity } from "lucide-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { useAuth } from "@/contexts/AuthContext"
+import { useUser, useClerk } from "@clerk/nextjs"
 import {
   Sidebar,
   SidebarContent,
@@ -27,12 +27,12 @@ const items = [
     title: "Dashboard",
     url: "/",
     icon: Home,
-  },
-  {
-    title: "Machines",
-    url: "/machines",
-    icon: Wrench,
-  },
+},
+  // {
+  //   title: "Machines",
+  //   url: "/machines",
+  //   icon: Wrench,
+  // },
   {
     title: "Machine Vitals",
     url: "/vitals",
@@ -57,7 +57,8 @@ const items = [
 
 export function AppSidebar() {
   const pathname = usePathname()
-  const { user, signOut } = useAuth()
+  const { user } = useUser()
+  const { signOut } = useClerk()
 
   const handleSignOut = () => {
     signOut()
@@ -111,14 +112,14 @@ export function AppSidebar() {
                   className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
                 >
                   <Avatar className="h-8 w-8 rounded-lg">
-                    <AvatarImage src={user?.avatar || "/placeholder.svg?height=32&width=32"} alt="Avatar" />
+                    <AvatarImage src={user?.imageUrl || "/placeholder.svg?height=32&width=32"} alt="Avatar" />
                     <AvatarFallback className="rounded-lg">
-                      {user?.name?.split(' ').map(n => n[0]).join('').toUpperCase() || 'U'}
+                      {user?.firstName?.[0]}{user?.lastName?.[0]}
                     </AvatarFallback>
                   </Avatar>
                   <div className="grid flex-1 text-left text-sm leading-tight">
-                    <span className="truncate font-semibold">{user?.name || 'User'}</span>
-                    <span className="truncate text-xs">{user?.email || 'user@example.com'}</span>
+                    <span className="truncate font-semibold">{user?.fullName || 'User'}</span>
+                    <span className="truncate text-xs">{user?.primaryEmailAddress?.emailAddress || 'user@example.com'}</span>
                   </div>
                   <ChevronUp className="ml-auto size-4" />
                 </SidebarMenuButton>
