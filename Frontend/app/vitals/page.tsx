@@ -17,7 +17,9 @@ import {
   AlertCircle,
   CheckCircle,
   XCircle,
-  Clock
+  Clock,
+  PowerOff,
+  Power
 } from "lucide-react"
 import { apiClient } from "@/lib/api"
 import { useToast } from "@/components/ui/use-toast"
@@ -183,6 +185,52 @@ export default function ImprovedVitalsPage() {
       toast({
         title: "Error",
         description: "Failed to stop simulation",
+        variant: "destructive",
+      })
+    }
+  }
+
+  // Take machine offline
+  const takeMachineOffline = async (machineId: string, machineName: string) => {
+    try {
+      const response = await apiClient.updateMachineStatus(machineId, 'offline')
+      if (response.success) {
+        toast({
+          title: "Machine Taken Offline",
+          description: `${machineName} has been taken offline for safety.`,
+        })
+        // Refresh machine data
+        await fetchMachines()
+        await fetchMachineVitals(machineId)
+      }
+    } catch (error) {
+      console.error('Error taking machine offline:', error)
+      toast({
+        title: "Error",
+        description: "Failed to take machine offline",
+        variant: "destructive",
+      })
+    }
+  }
+
+  // Bring machine back online
+  const bringMachineOnline = async (machineId: string, machineName: string) => {
+    try {
+      const response = await apiClient.updateMachineStatus(machineId, 'online')
+      if (response.success) {
+        toast({
+          title: "Machine Brought Online",
+          description: `${machineName} is now online.`,
+        })
+        // Refresh machine data
+        await fetchMachines()
+        await fetchMachineVitals(machineId)
+      }
+    } catch (error) {
+      console.error('Error bringing machine online:', error)
+      toast({
+        title: "Error",
+        description: "Failed to bring machine online",
         variant: "destructive",
       })
     }
@@ -365,21 +413,32 @@ export default function ImprovedVitalsPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {machines.map(machine => {
               const vitals = machineVitals[machine.id]
+              const isOffline = machine.status === 'offline'
               return (
                 <Card 
                   key={machine.id}
-                  className={`cursor-pointer transition-all hover:shadow-lg ${selectedMachine === machine.id ? 'ring-2 ring-primary' : ''}`}
+                  className={`cursor-pointer transition-all hover:shadow-lg ${selectedMachine === machine.id ? 'ring-2 ring-primary' : ''} ${isOffline ? 'opacity-70 border-orange-500' : ''}`}
                   onClick={() => setSelectedMachine(machine.id)}
                 >
                   <CardHeader className="pb-3">
                     <div className="flex items-start justify-between">
-                      <div>
-                        <CardTitle className="text-lg">{machine.name}</CardTitle>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <CardTitle className="text-lg">{machine.name}</CardTitle>
+                          {isOffline && <PowerOff className="h-4 w-4 text-orange-600" />}
+                        </div>
                         <CardDescription className="text-xs">{machine.type}</CardDescription>
+                        {isOffline && (
+                          <Badge variant="outline" className="mt-1 text-xs border-orange-500 text-orange-700">
+                            OFFLINE
+                          </Badge>
+                        )}
                       </div>
-                      <Badge variant={getStatusVariant(machine.health_status) as any}>
-                        {machine.health_status}
-                      </Badge>
+                      {!isOffline && (
+                        <Badge variant={getStatusVariant(machine.health_status) as any}>
+                          {machine.health_status}
+                        </Badge>
+                      )}
                     </div>
                   </CardHeader>
                   <CardContent>
@@ -405,7 +464,7 @@ export default function ImprovedVitalsPage() {
                         </span>
                         <span className="font-medium">{vitals?.vibration?.toFixed(2) || machine.vitals.vibration.toFixed(2)} mm/s</span>
                       </div>
-                      {vitals?.prediction && (
+                      {vitals?.prediction && !isOffline && (
                         <div className="pt-2 border-t">
                           <div className="flex items-center justify-between text-xs">
                             <span>Failure Risk</span>
@@ -484,15 +543,64 @@ export default function ImprovedVitalsPage() {
               {currentVitals.prediction && (
                 <Card>
                   <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <AlertCircle className="h-5 w-5" />
-                      ML Failure Prediction
-                    </CardTitle>
-                    <CardDescription>
-                      Real-time machine learning prediction based on current vitals
-                    </CardDescription>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <CardTitle className="flex items-center gap-2">
+                          <AlertCircle className="h-5 w-5" />
+                          ML Failure Prediction
+                        </CardTitle>
+                        <CardDescription>
+                          Real-time machine learning prediction based on current vitals
+                        </CardDescription>
+                      </div>
+                      {currentVitals.prediction.failure_risk > 70 && (
+                        <div className="flex items-center gap-2">
+                          {currentMachine?.status === 'online' ? (
+                            <Button
+                              variant="destructive"
+                              size="lg"
+                              onClick={() => takeMachineOffline(currentMachine.id, currentMachine.name)}
+                              className="gap-2"
+                            >
+                              <PowerOff className="h-5 w-5" />
+                              Take Machine Offline
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="default"
+                              size="lg"
+                              onClick={() => bringMachineOnline(currentMachine.id, currentMachine.name)}
+                              className="gap-2"
+                            >
+                              <Power className="h-5 w-5" />
+                              Bring Back Online
+                            </Button>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </CardHeader>
                   <CardContent>
+                    {currentVitals.prediction.failure_risk > 70 && currentMachine?.status === 'online' && (
+                      <Alert variant="destructive" className="mb-4">
+                        <AlertTriangle className="h-4 w-4" />
+                        <AlertDescription>
+                          <strong>Critical Warning:</strong> This machine has a failure risk above 70%. 
+                          It is recommended to take it offline immediately to prevent potential damage or safety hazards.
+                        </AlertDescription>
+                      </Alert>
+                    )}
+                    
+                    {currentMachine?.status === 'offline' && (
+                      <Alert className="mb-4 border-orange-500 bg-orange-50">
+                        <PowerOff className="h-4 w-4 text-orange-600" />
+                        <AlertDescription className="text-orange-800">
+                          <strong>Machine Offline:</strong> This machine has been taken offline for safety. 
+                          Please perform necessary maintenance before bringing it back online.
+                        </AlertDescription>
+                      </Alert>
+                    )}
+                    
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                       <div>
                         <div className="text-sm text-muted-foreground mb-1">Failure Risk</div>

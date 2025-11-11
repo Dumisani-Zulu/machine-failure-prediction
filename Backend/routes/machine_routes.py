@@ -265,9 +265,9 @@ def simulation_worker():
                             'failure_risk': int(prediction_result.get('most_likely_failure_probability', 0) * 100),
                             'predicted_failure_type': prediction_result.get('most_likely_failure'),
                             'estimated_hours': prediction_result.get('most_likely_failure_estimated_hours'),
-                            'risk_level': 'critical' if prediction_result.get('most_likely_failure_probability', 0) >= 0.8 
-                                        else 'high' if prediction_result.get('most_likely_failure_probability', 0) >= 0.6
-                                        else 'medium' if prediction_result.get('most_likely_failure_probability', 0) >= 0.4
+                            'risk_level': 'critical' if prediction_result.get('most_likely_failure_probability', 0) > 0.7 
+                                        else 'high' if prediction_result.get('most_likely_failure_probability', 0) >= 0.5
+                                        else 'medium' if prediction_result.get('most_likely_failure_probability', 0) >= 0.3
                                         else 'low',
                             'timestamp': datetime.utcnow().isoformat()
                         }
@@ -865,13 +865,13 @@ def get_machine_details(machine_id):
             prediction_result = get_machine_specific_prediction(machine['type'], history)
 
             prob = prediction_result.get('most_likely_failure_probability', 0)
-            if prob >= 0.8:
-                maintenance_priority = 'urgent'
+            if prob > 0.7:
+                maintenance_priority = 'critical'
                 recommended_action = 'Shut down and perform immediate inspection'
-            elif prob >= 0.6:
+            elif prob > 0.5:
                 maintenance_priority = 'high'
                 recommended_action = 'Schedule maintenance in next 24 hours'
-            elif prob >= 0.4:
+            elif prob > 0.3:
                 maintenance_priority = 'medium'
                 recommended_action = 'Monitor closely and schedule preventive maintenance'
             else:
@@ -918,6 +918,57 @@ def get_machine_details(machine_id):
         return jsonify({
             'success': True,
             'data': detailed_data
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@machine_bp.route('/machines/<machine_id>/status', methods=['PATCH'])
+def update_machine_status(machine_id):
+    """Update machine status (online/offline/maintenance)"""
+    try:
+        data = request.get_json()
+        new_status = data.get('status')
+        
+        if not new_status:
+            return jsonify({
+                'success': False,
+                'error': 'Status is required'
+            }), 400
+        
+        if new_status not in ['online', 'offline', 'maintenance']:
+            return jsonify({
+                'success': False,
+                'error': 'Invalid status. Must be one of: online, offline, maintenance'
+            }), 400
+        
+        # Find the machine in MINING_MACHINES
+        machine = next((m for m in MINING_MACHINES if m['id'] == machine_id), None)
+        if not machine:
+            return jsonify({
+                'success': False,
+                'error': f'Machine {machine_id} not found'
+            }), 404
+        
+        # Update the status
+        with lock:
+            machine['status'] = new_status
+            
+            # Also update in CURRENT_MACHINE_VITALS if it exists
+            if machine_id in CURRENT_MACHINE_VITALS:
+                CURRENT_MACHINE_VITALS[machine_id]['status'] = new_status
+        
+        return jsonify({
+            'success': True,
+            'message': f'Machine {machine["name"]} status updated to {new_status}',
+            'data': {
+                'id': machine_id,
+                'name': machine['name'],
+                'status': new_status
+            }
         }), 200
         
     except Exception as e:

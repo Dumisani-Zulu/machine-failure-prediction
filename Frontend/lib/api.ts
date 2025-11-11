@@ -83,8 +83,8 @@ class ApiClient {
     return this.handleResponse(response);
   }
 
-  async updateMachineStatus(id: string, status: 'online' | 'offline' | 'maintenance'): Promise<Machine> {
-    const response = await fetch(`${this.baseUrl}/machines/${id}/status`, {
+  async updateMachineStatus(id: string, status: 'online' | 'offline' | 'maintenance'): Promise<{ success: boolean; message: string; data: any }> {
+    const response = await fetch(`${this.baseUrl}/machine/machines/${id}/status`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',

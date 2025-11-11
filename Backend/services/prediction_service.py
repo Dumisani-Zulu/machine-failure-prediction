@@ -219,9 +219,9 @@ def get_machine_specific_prediction(machine_type: str, raw_input_data: dict) -> 
 
             specific_failure_predictions[failure_type] = {
                 "probability": failure_probability,
-                "risk_level": "critical" if failure_probability > 0.8 else 
-                            "high" if failure_probability > 0.6 else 
-                            "medium" if failure_probability > 0.4 else "low",
+                "risk_level": "critical" if failure_probability > 0.7 else 
+                            "high" if failure_probability > 0.5 else 
+                            "medium" if failure_probability > 0.3 else "low",
                 "estimated_time_to_failure_hours": estimated_hours
             }
 
