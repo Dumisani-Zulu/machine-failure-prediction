@@ -50,12 +50,14 @@ interface MachineVitals {
   }>
 }
 
-interface Machine {
+interface MachineData {
   id: string
   name: string
   type: string
   status: string
   health_status: string
+  location?: string
+  description?: string
   vitals: {
     temperature: number
     pressure: number
@@ -74,7 +76,7 @@ interface Machine {
 
 export default function ImprovedVitalsPage() {
   const { toast } = useToast()
-  const [machines, setMachines] = useState<Machine[]>([])
+  const [machines, setMachines] = useState<MachineData[]>([])
   const [selectedMachine, setSelectedMachine] = useState<string | null>(null)
   const [machineVitals, setMachineVitals] = useState<Record<string, MachineVitals>>({})
   const [simulationRunning, setSimulationRunning] = useState(false)
@@ -581,7 +583,19 @@ export default function ImprovedVitalsPage() {
                     </div>
                   </CardHeader>
                   <CardContent>
-                    {currentVitals.prediction.failure_risk > 70 && currentMachine?.status === 'online' && (
+                    {currentVitals.prediction.failure_risk > 90 && currentMachine?.status === 'offline' && (
+                      <Alert variant="destructive" className="mb-4 border-red-700 bg-red-50">
+                        <AlertCircle className="h-4 w-4 text-red-700" />
+                        <AlertDescription className="text-red-900">
+                          <strong>🚨 AUTOMATIC SHUTDOWN:</strong> This machine was automatically taken offline due to critically high failure risk (&gt;90%). 
+                          <div className="mt-2 font-semibold">
+                            IMMEDIATE MAINTENANCE REQUIRED - Do not restart until inspection is complete.
+                          </div>
+                        </AlertDescription>
+                      </Alert>
+                    )}
+                    
+                    {currentVitals.prediction.failure_risk > 70 && currentVitals.prediction.failure_risk <= 90 && currentMachine?.status === 'online' && (
                       <Alert variant="destructive" className="mb-4">
                         <AlertTriangle className="h-4 w-4" />
                         <AlertDescription>
@@ -591,7 +605,7 @@ export default function ImprovedVitalsPage() {
                       </Alert>
                     )}
                     
-                    {currentMachine?.status === 'offline' && (
+                    {currentMachine?.status === 'offline' && currentVitals.prediction.failure_risk <= 90 && (
                       <Alert className="mb-4 border-orange-500 bg-orange-50">
                         <PowerOff className="h-4 w-4 text-orange-600" />
                         <AlertDescription className="text-orange-800">

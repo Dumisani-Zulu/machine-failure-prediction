@@ -393,6 +393,157 @@ class SensorSimulator:
         """
         
         return html
+    
+    def create_shutdown_alert_email(self, machine_name: str, machine_type: str, location: str, 
+                                    failure_risk: int, failure_type: str, estimated_hours: any,
+                                    temperature: float, pressure: float, vibration: float) -> str:
+        """Create HTML email body for automatic machine shutdown alert"""
+        
+        html = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f4f4f4;">
+            <div style="max-width: 600px; margin: 0 auto; background-color: white; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                
+                <!-- Header -->
+                <div style="background-color: #dc2626; color: white; padding: 30px; text-align: center;">
+                    <h1 style="margin: 0; font-size: 28px;">🚨 AUTOMATIC MACHINE SHUTDOWN</h1>
+                    <p style="margin: 10px 0 0 0; font-size: 18px; font-weight: bold;">CRITICAL FAILURE RISK DETECTED</p>
+                </div>
+                
+                <!-- Alert Banner -->
+                <div style="background-color: #fee2e2; border-left: 6px solid #dc2626; padding: 20px; margin: 20px;">
+                    <p style="margin: 0; color: #991b1b; font-size: 16px; font-weight: bold;">
+                        ⚠️ This machine has been automatically taken OFFLINE due to critically high failure probability (&gt;90%)
+                    </p>
+                </div>
+                
+                <!-- Machine Information -->
+                <div style="padding: 0 30px 30px 30px;">
+                    <h2 style="color: #333; margin-top: 0; border-bottom: 2px solid #dc2626; padding-bottom: 10px;">
+                        Machine Information
+                    </h2>
+                    
+                    <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+                        <tr>
+                            <td style="padding: 12px; background-color: #f9fafb; border: 1px solid #e5e7eb; font-weight: bold; width: 40%;">Machine Name:</td>
+                            <td style="padding: 12px; background-color: white; border: 1px solid #e5e7eb;">{machine_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 12px; background-color: #f9fafb; border: 1px solid #e5e7eb; font-weight: bold;">Machine Type:</td>
+                            <td style="padding: 12px; background-color: white; border: 1px solid #e5e7eb;">{machine_type}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 12px; background-color: #f9fafb; border: 1px solid #e5e7eb; font-weight: bold;">Location:</td>
+                            <td style="padding: 12px; background-color: white; border: 1px solid #e5e7eb;">{location}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 12px; background-color: #f9fafb; border: 1px solid #e5e7eb; font-weight: bold;">Current Status:</td>
+                            <td style="padding: 12px; background-color: white; border: 1px solid #e5e7eb;">
+                                <span style="background-color: #dc2626; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;">
+                                    OFFLINE
+                                </span>
+                            </td>
+                        </tr>
+                    </table>
+                    
+                    <!-- Failure Prediction -->
+                    <h2 style="color: #333; margin-top: 30px; border-bottom: 2px solid #dc2626; padding-bottom: 10px;">
+                        Failure Prediction
+                    </h2>
+                    
+                    <div style="background-color: #fee2e2; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                        <div style="text-align: center; margin-bottom: 20px;">
+                            <div style="font-size: 48px; font-weight: bold; color: #dc2626; line-height: 1;">
+                                {failure_risk}%
+                            </div>
+                            <div style="font-size: 14px; color: #991b1b; margin-top: 5px; font-weight: bold;">
+                                FAILURE RISK
+                            </div>
+                        </div>
+                        
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <tr>
+                                <td style="padding: 10px; background-color: white; border-radius: 4px; margin: 5px;">
+                                    <strong>Predicted Failure Type:</strong><br>
+                                    <span style="color: #dc2626; font-size: 16px;">{failure_type.replace('_', ' ').upper()}</span>
+                                </td>
+                            </tr>
+                            <tr><td style="height: 10px;"></td></tr>
+                            <tr>
+                                <td style="padding: 10px; background-color: white; border-radius: 4px;">
+                                    <strong>Estimated Time to Failure:</strong><br>
+                                    <span style="color: #dc2626; font-size: 16px;">{estimated_hours} hours</span>
+                                </td>
+                            </tr>
+                        </table>
+                    </div>
+                    
+                    <!-- Current Vitals -->
+                    <h2 style="color: #333; margin-top: 30px; border-bottom: 2px solid #dc2626; padding-bottom: 10px;">
+                        Current Sensor Readings
+                    </h2>
+                    
+                    <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+                        <tr style="background-color: #f9fafb;">
+                            <th style="padding: 12px; text-align: left; border: 1px solid #e5e7eb;">Sensor</th>
+                            <th style="padding: 12px; text-align: left; border: 1px solid #e5e7eb;">Reading</th>
+                            <th style="padding: 12px; text-align: left; border: 1px solid #e5e7eb;">Normal Range</th>
+                        </tr>
+                        <tr>
+                            <td style="padding: 12px; border: 1px solid #e5e7eb;">🌡️ Temperature</td>
+                            <td style="padding: 12px; border: 1px solid #e5e7eb; font-weight: bold; color: #dc2626;">{temperature:.1f}°C</td>
+                            <td style="padding: 12px; border: 1px solid #e5e7eb;">20-85°C</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 12px; border: 1px solid #e5e7eb;">📊 Pressure</td>
+                            <td style="padding: 12px; border: 1px solid #e5e7eb; font-weight: bold; color: #dc2626;">{pressure:.1f} PSI</td>
+                            <td style="padding: 12px; border: 1px solid #e5e7eb;">50-150 PSI</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 12px; border: 1px solid #e5e7eb;">⚡ Vibration</td>
+                            <td style="padding: 12px; border: 1px solid #e5e7eb; font-weight: bold; color: #dc2626;">{vibration:.2f} mm/s</td>
+                            <td style="padding: 12px; border: 1px solid #e5e7eb;">0.1-2.0 mm/s</td>
+                        </tr>
+                    </table>
+                    
+                    <!-- Required Actions -->
+                    <h2 style="color: #333; margin-top: 30px; border-bottom: 2px solid #dc2626; padding-bottom: 10px;">
+                        🔧 Required Actions
+                    </h2>
+                    
+                    <div style="background-color: #fef3c7; border-left: 4px solid #f59e0b; padding: 20px; margin: 20px 0;">
+                        <ol style="margin: 0; padding-left: 20px; color: #92400e;">
+                            <li style="margin-bottom: 10px;"><strong>IMMEDIATE:</strong> Do not attempt to restart the machine</li>
+                            <li style="margin-bottom: 10px;"><strong>URGENT:</strong> Dispatch maintenance team for inspection</li>
+                            <li style="margin-bottom: 10px;"><strong>REQUIRED:</strong> Investigate predicted failure type: {failure_type.replace('_', ' ')}</li>
+                            <li style="margin-bottom: 10px;"><strong>CRITICAL:</strong> Perform comprehensive diagnostics before bringing machine back online</li>
+                            <li style="margin-bottom: 10px;"><strong>SAFETY:</strong> Ensure area is secured and all personnel are notified</li>
+                        </ol>
+                    </div>
+                    
+                    <!-- Footer -->
+                    <div style="margin-top: 30px; padding: 20px; background-color: #f9fafb; border-radius: 8px; border: 1px solid #e5e7eb;">
+                        <p style="margin: 0; color: #666; font-size: 14px;">
+                            <strong>Timestamp:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}<br>
+                            <strong>System:</strong> Machine Failure Prediction System<br>
+                            <strong>Alert Type:</strong> Automatic Shutdown (Failure Risk &gt; 90%)<br>
+                            <strong>Priority:</strong> CRITICAL - IMMEDIATE ACTION REQUIRED
+                        </p>
+                    </div>
+                    
+                    <div style="margin-top: 20px; padding: 15px; background-color: #fee2e2; border-radius: 8px;">
+                        <p style="margin: 0; color: #991b1b; font-size: 13px; text-align: center;">
+                            ⚠️ This is an automated alert from the Machine Monitoring System. 
+                            The machine will remain offline until manually brought back online after maintenance.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        
+        return html
 
 # Global simulator instance
 simulator = SensorSimulator()

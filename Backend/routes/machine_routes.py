@@ -261,16 +261,73 @@ def simulation_worker():
                             vit['history'][-3:]  # Use last 3 readings for prediction
                         )
                         
+                        failure_probability = prediction_result.get('most_likely_failure_probability', 0)
+                        failure_risk_percentage = int(failure_probability * 100)
+                        
                         vit['prediction'] = {
-                            'failure_risk': int(prediction_result.get('most_likely_failure_probability', 0) * 100),
+                            'failure_risk': failure_risk_percentage,
                             'predicted_failure_type': prediction_result.get('most_likely_failure'),
                             'estimated_hours': prediction_result.get('most_likely_failure_estimated_hours'),
-                            'risk_level': 'critical' if prediction_result.get('most_likely_failure_probability', 0) > 0.7 
-                                        else 'high' if prediction_result.get('most_likely_failure_probability', 0) >= 0.5
-                                        else 'medium' if prediction_result.get('most_likely_failure_probability', 0) >= 0.3
+                            'risk_level': 'critical' if failure_probability > 0.7 
+                                        else 'high' if failure_probability >= 0.5
+                                        else 'medium' if failure_probability >= 0.3
                                         else 'low',
                             'timestamp': datetime.utcnow().isoformat()
                         }
+                        
+                        # AUTO-SHUTDOWN: If failure risk > 90%, automatically take machine offline
+                        if failure_risk_percentage > 90 and machine_config['status'] == 'online':
+                            machine_config['status'] = 'offline'
+                            vit['status'] = 'offline'
+                            
+                            # Log the automatic shutdown
+                            print(f"[AUTO-SHUTDOWN] Machine {machine_config['name']} (ID: {mid}) taken offline automatically - Failure risk: {failure_risk_percentage}%")
+                            
+                            # Send alert notification
+                            alert_message = f"""
+CRITICAL ALERT: Automatic Machine Shutdown
+
+Machine: {machine_config['name']}
+Type: {machine_config['type']}
+Location: {machine_config.get('location', 'Unknown')}
+Status: OFFLINE (Automatic Shutdown)
+
+Failure Risk: {failure_risk_percentage}%
+Predicted Failure: {prediction_result.get('most_likely_failure', 'Unknown').replace('_', ' ').upper()}
+Estimated Time to Failure: {prediction_result.get('most_likely_failure_estimated_hours', 'N/A')} hours
+
+Current Vitals:
+- Temperature: {new_t}°C
+- Pressure: {new_p} PSI
+- Vibration: {new_v} mm/s
+
+ACTION REQUIRED: Immediate inspection and maintenance needed before machine can be brought back online.
+
+Timestamp: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}
+"""
+                            
+                            try:
+                                # Send email alert using sensor_simulation's email system
+                                simulator.send_email_alert(
+                                    subject=f"🚨 CRITICAL: {machine_config['name']} Auto-Shutdown - {failure_risk_percentage}% Failure Risk",
+                                    body=simulator.create_shutdown_alert_email(
+                                        machine_config['name'],
+                                        machine_config['type'],
+                                        machine_config.get('location', 'Unknown'),
+                                        failure_risk_percentage,
+                                        prediction_result.get('most_likely_failure', 'Unknown'),
+                                        prediction_result.get('most_likely_failure_estimated_hours', 'N/A'),
+                                        new_t,
+                                        new_p,
+                                        new_v
+                                    )
+                                )
+                                print(f"[AUTO-SHUTDOWN] Alert email sent for machine {machine_config['name']}")
+                            except Exception as email_error:
+                                print(f"[AUTO-SHUTDOWN] Failed to send email alert: {email_error}")
+                                # Print alert to console as fallback
+                                print(alert_message)
+                        
                 except Exception as e:
                     print(f"[Simulation Worker] Prediction error for machine {mid}: {e}")
                     vit['prediction'] = None
